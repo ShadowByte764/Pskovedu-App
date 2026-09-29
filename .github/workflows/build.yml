@@ -14,27 +14,84 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Restructure Android Project & Fix Configs
+      - name: Auto-structure & Generate Gradle Configs
         run: |
-          # Создаем структуру папок
-          mkdir -p app/src/main/java/ru/pskovedu/diary
+          # 1. Автоматически определяем package из MainActivity.kt
+          PKG_NAME="ru.pskovedu.diary"
+          if [ -f MainActivity.kt ]; then
+            EXTRACTED_PKG=$(grep -E "^package " MainActivity.kt | head -n 1 | awk '{print $2}' | tr -d ';')
+            if [ -n "$EXTRACTED_PKG" ]; then
+              PKG_NAME="$EXTRACTED_PKG"
+            fi
+          fi
+          PKG_PATH=$(echo "$PKG_NAME" | tr '.' '/')
+
+          # 2. Создаем структуру директорий
+          mkdir -p "app/src/main/java/$PKG_PATH"
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
 
-          # Перемещаем исходные файлы по местам
-          [ -f MainActivity.kt ] && mv MainActivity.kt app/src/main/java/ru/pskovedu/diary/ || true
+          # 3. Распределяем файлы
+          [ -f MainActivity.kt ] && mv MainActivity.kt "app/src/main/java/$PKG_PATH/" || true
           [ -f AndroidManifest.xml ] && mv AndroidManifest.xml app/src/main/ || true
           [ -f strings.xml ] && mv strings.xml app/src/main/res/values/ || true
           [ -f themes.xml ] && mv themes.xml app/src/main/res/values/ || true
           [ -f backup_rules.xml ] && mv backup_rules.xml app/src/main/res/xml/ || true
           [ -f data_extraction_rules.xml ] && mv data_extraction_rules.xml app/src/main/res/xml/ || true
 
-          # Переносим конфиг в модуль app
-          if [ -f build.gradle.kts ]; then
-            mv build.gradle.kts app/build.gradle.kts
-          fi
+          # 4. Создаем гарантированно рабочий app/build.gradle.kts (Compose + Custom Tabs)
+          cat << EOF > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
 
-          # Создаем корректный корневой build.gradle.kts
+          android {
+              namespace = "$PKG_NAME"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "$PKG_NAME"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  compose = true
+              }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.4"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+              implementation("androidx.activity:activity-compose:1.8.2")
+              implementation(platform("androidx.compose:compose-bom:2023.08.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-graphics")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.browser:browser:1.7.0")
+          }
+          EOF
+
+          # 5. Корневой build.gradle.kts
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.2.0" apply false
@@ -42,7 +99,7 @@ jobs:
           }
           EOF
 
-          # Создаем корректный settings.gradle.kts с репозиториями Google
+          # 6. settings.gradle.kts
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -73,5 +130,5 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-
+          
           
